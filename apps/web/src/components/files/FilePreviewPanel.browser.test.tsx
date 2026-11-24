@@ -745,3 +745,134 @@ describe("rendered Markdown relative images", () => {
     );
   });
 });
+
+it("opens TeX in the native editor, attaches selected source and reports build errors", async () => {
+  using _settings = setup();
+  const { useComposerDraftStore } = await import("~/composerDraftStore");
+  const { EditorView } = await import("@codemirror/view");
+  const store = useComposerDraftStore.getState();
+  const previous = store.getComposerDraft(threadRef)?.prompt ?? "";
+  try {
+    store.setPrompt(threadRef, "Explain this equation");
+    const source = "\\section{Energy}\nE=mc^2\n";
+    const style = document.createElement("style");
+    style.textContent = appCss;
+    document.head.append(style);
+    using _style = { [Symbol.dispose]: () => style.remove() };
+    await using screen = await render(
+      <div style={{ width: 940, height: 560, display: "flex", flexDirection: "column" }}>
+        {markdownPreview(false, source, "paper.tex")}
+      </div>,
+    );
+    const build = screen.getByRole("button", { name: "Build PDF" });
+    await expect.element(build).toBeVisible();
+    expect(state.writeFile).not.toHaveBeenCalled();
+    const host = screen.container.querySelector(".cm-editor")!;
+    const view = EditorView.findFromDOM(host as HTMLElement)!;
+    await act(async () =>
+      view.dispatch({
+        selection: { anchor: source.indexOf("E=mc"), head: source.trimEnd().length },
+      }),
+    );
+    await screen.getByRole("button", { name: "Add selection to chat" }).click();
+    expect(store.getComposerDraft(threadRef)?.prompt).toContain(
+      "Explain this equation\n\npaper.tex lines 2",
+    );
+    expect(store.getComposerDraft(threadRef)?.prompt).toContain("> E=mc^2");
+    const { testPdf } = await import("../../../test/testPdf");
+    state.writeFile.mockResolvedValue(
+      AsyncResult.success({
+        pdf: btoa(await testPdf().text()),
+        points: [{ path: "paper.tex", line: 2, page: 1, y: 70 }],
+        citations: [],
+        log: "Build complete",
+      }),
+    );
+    await build.click();
+    await expect.element(screen.getByText("PDF ready", { exact: true })).toBeVisible();
+    await vi.waitFor(
+      () =>
+        expect(
+          screen.container.querySelector("[data-pdf-text-layer] span")?.textContent,
+        ).toBeTruthy(),
+      { timeout: 15000 },
+    );
+    const span = screen.container.querySelector("[data-pdf-text-layer] span")!;
+    const quote = span.textContent!;
+    await act(async () => {
+      const range = document.createRange();
+      range.selectNodeContents(span);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+      span.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    });
+    await screen.getByRole("button", { name: "Add selection to chat" }).click();
+    expect(store.getComposerDraft(threadRef)?.prompt).toContain(
+      "paper.tex (PDF page 1)\n> " + quote.trim(),
+    );
+    await act(async () => {
+      span.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientY: 75 }));
+    });
+    expect(view.state.doc.lineAt(view.state.selection.main.head).number).toBe(2);
+    await screen.getByRole("button", { name: "Clip PDF to chat" }).click();
+    const overlay = screen.container.querySelector<HTMLElement>(".cursor-crosshair")!;
+    overlay.scrollIntoView({ block: "center", inline: "center" });
+    const bounds = overlay.getBoundingClientRect();
+    const localX = Math.max(1, bounds.left + 12),
+      localY = Math.max(1, bounds.top + 12);
+    expect(document.elementFromPoint(localX, localY)).toBe(overlay);
+    // Synthetic events have no browser-owned pointer id to capture.
+    using _capture = vi.spyOn(overlay, "setPointerCapture").mockImplementation(() => {});
+    using _captured = vi.spyOn(overlay, "hasPointerCapture").mockReturnValue(true);
+    for (const [type, dx, dy] of [
+      ["pointerdown", 0, 0],
+      ["pointermove", 55, 30],
+      ["pointerup", 55, 30],
+    ] as const) {
+      await act(async () => {
+        overlay.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            pointerId: 1,
+            isPrimary: true,
+            button: 0,
+            clientX: localX + dx,
+            clientY: localY + dy,
+          }),
+        );
+      });
+    }
+    await vi.waitFor(
+      () =>
+        expect(
+          store.getComposerDraft(threadRef)?.images.map((image) => image.name),
+          screen.container.querySelector('[role="status"]')?.textContent ?? "",
+        ).toContain("paper.tex-page-1.png"),
+      { timeout: 5000 },
+    );
+    state.writeFile.mockResolvedValue(
+      AsyncResult.success({
+        pdf: null,
+        points: [],
+        citations: [],
+        log: "paper.tex:2: Undefined control sequence",
+      }),
+    );
+    await build.click();
+    await expect.element(screen.getByText("Build failed", { exact: true })).toBeVisible();
+    await expect
+      .element(screen.getByText("paper.tex:2: Undefined control sequence", { exact: true }))
+      .toBeVisible();
+    expect(screen.container.querySelector("[data-pdf-page]")).not.toBeNull();
+    await act(async () =>
+      view.dispatch({
+        changes: { from: source.indexOf("E=mc"), to: source.trimEnd().length, insert: "E = mc^2" },
+      }),
+    );
+    expect(state.optimistic?.contents).toContain("E = mc^2");
+  } finally {
+    for (const image of store.getComposerDraft(threadRef)?.images ?? [])
+      if (image.name === "paper.tex-page-1.png") store.removeImage(threadRef, image.id);
+    store.setPrompt(threadRef, previous);
+  }
+});

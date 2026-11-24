@@ -1,3 +1,4 @@
+import { PdfClipOverlay } from "./PdfClipOverlay";
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import {
   useEffect,
@@ -248,6 +249,9 @@ export default function PdfViewer(props: {
   initialView?: PdfViewState;
   onViewChange?: (view: PdfViewState) => void;
   onOpenLink?: (url: string, event: MouseEvent) => void;
+  sourcePosition?: { page: number; y: number } | null;
+  onClip?: ((blob: Blob, page: number) => void) | undefined;
+  onSourceJump?: (page: number, y: number) => void;
   actions?: ReactNode;
 }) {
   const gt = useGT();
@@ -388,6 +392,17 @@ export default function PdfViewer(props: {
   const showPage = (index: number) => {
     scroll.current?.scrollTo({ top: pdfPageScrollTop(offsets, index) });
   };
+  const moveToSourcePosition = useEffectEvent((position: { page: number; y: number }) => {
+    const top = offsets[position.page - 1];
+    if (top !== undefined)
+      scroll.current?.scrollTo({
+        top: top + (position.y * width) / pageWidth - viewport.height / 3,
+      });
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Scroll the PDF viewport to the requested SyncTeX position after its layout commits.
+  useEffect(() => {
+    if (pdf && props.sourcePosition) moveToSourcePosition(props.sourcePosition);
+  }, [pdf, props.sourcePosition]);
   const changeZoom = (value: number | null) => {
     zoomAnchor.current = {
       page: current,
@@ -578,6 +593,23 @@ export default function PdfViewer(props: {
           saveView(event.currentTarget);
         }}
         onKeyDown={(event) => {
+          if (
+            props.onSourceJump &&
+            (event.ctrlKey || event.metaKey) &&
+            event.shiftKey &&
+            event.key.toLowerCase() === "j"
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            const y = Math.max(
+              0,
+              ((event.currentTarget.scrollTop + viewport.height / 3 - (offsets[current] ?? 0)) *
+                pageWidth) /
+                width,
+            );
+            props.onSourceJump(current + 1, y);
+            return;
+          }
           if ((event.ctrlKey || event.metaKey) && event.key === "f") {
             event.preventDefault();
             event.stopPropagation();
@@ -607,6 +639,19 @@ export default function PdfViewer(props: {
             {visible.map(({ index, ratio }) => (
               <div
                 key={index}
+                data-pdf-page={index + 1}
+                onDoubleClick={
+                  props.onSourceJump
+                    ? (event) => {
+                        props.onSourceJump?.(
+                          index + 1,
+                          ((event.clientY - event.currentTarget.getBoundingClientRect().top) *
+                            pageWidth) /
+                            width,
+                        );
+                      }
+                    : undefined
+                }
                 className="absolute bg-white shadow-sm"
                 style={
                   {
@@ -628,6 +673,9 @@ export default function PdfViewer(props: {
                   onPageLink={showPage}
                   onOpenLink={props.onOpenLink}
                 />
+                {props.onClip && (
+                  <PdfClipOverlay onClip={(blob) => props.onClip?.(blob, index + 1)} />
+                )}
               </div>
             ))}
           </div>

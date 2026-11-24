@@ -176,6 +176,8 @@ const MermaidFilePreview = lazy(() =>
   import("./MermaidFilePreview").then((module) => ({ default: module.MermaidFilePreview })),
 );
 
+const LatexWorkbench = lazy(() => import("./LatexWorkbench"));
+
 const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
 const RENDER_MARKDOWN_STORAGE_KEY = "t3code.renderMarkdown";
 const RENDER_BROWSER_FILE_STORAGE_KEY = "t3code.renderBrowserFile";
@@ -1210,10 +1212,12 @@ function RenderedMarkdownSurface({
 }
 
 function renderedToggleLabel(
-  mode: "markdown" | "mermaid" | "html" | "table",
+  mode: "latex" | "markdown" | "mermaid" | "html" | "table",
   rendered: boolean,
   resolve: MessageResolver,
 ): string {
+  if (mode === "latex")
+    return rendered ? resolve(msg("Show source")) : resolve(msg("Open LaTeX editor"));
   if (mode === "mermaid")
     return rendered ? resolve(msg("Show Mermaid source")) : resolve(msg("Show rendered diagram"));
   if (mode === "markdown")
@@ -1347,6 +1351,13 @@ export default function FilePreviewPanel({
   );
   const breadcrumbRef = useRef<HTMLDivElement>(null);
   const isMarkdown = previewPath ? isMarkdownPreviewFile(previewPath) : false;
+  const isLatex =
+    relativePath !== null && /\.tex$/i.test(relativePath) && !isHostFile && !file.data?.truncated;
+  const [latexPreferred, setLatexPreferred] = useLocalStorage(
+    "t3code.latexEditor",
+    true,
+    Schema.Boolean,
+  );
   const isMermaid = previewPath !== null && /\.(mmd|mermaid)$/i.test(previewPath);
   const [renderMermaidPreferred, setRenderMermaidPreferred] = useLocalStorage(
     "t3code.renderMermaid",
@@ -1363,15 +1374,18 @@ export default function FilePreviewPanel({
   const renderMermaid = isMermaid && renderMermaidPreferred && revealHandled;
   const renderBrowserFile = isPdf || (isHtml && renderBrowserFilePreferred && revealHandled);
   const renderTable = tableDelimiter !== null && renderTablePreferred && revealHandled;
-  const renderedMode = isMermaid
-    ? ("mermaid" as const)
-    : isMarkdown
-      ? ("markdown" as const)
-      : tableDelimiter
-        ? ("table" as const)
-        : isHtml
-          ? ("html" as const)
-          : null;
+  const renderLatex = isLatex && latexPreferred && revealHandled;
+  const renderedMode = isLatex
+    ? ("latex" as const)
+    : isMermaid
+      ? ("mermaid" as const)
+      : isMarkdown
+        ? ("markdown" as const)
+        : tableDelimiter
+          ? ("table" as const)
+          : isHtml
+            ? ("html" as const)
+            : null;
   const canToggleRendered =
     previewPath !== null &&
     attachment === undefined &&
@@ -1381,6 +1395,7 @@ export default function FilePreviewPanel({
     previewPath !== null &&
     file.data !== null &&
     !(isMarkdown && renderMarkdown) &&
+    !renderLatex &&
     !renderMermaid &&
     !(tableDelimiter && renderTable) &&
     !renderBrowserFile &&
@@ -1394,6 +1409,7 @@ export default function FilePreviewPanel({
     !isMedia &&
     !isDocument &&
     !renderBrowserFile &&
+    !renderLatex &&
     !renderMermaid &&
     !(isMarkdown && renderMarkdown) &&
     !(tableDelimiter && renderTable);
@@ -1413,6 +1429,7 @@ export default function FilePreviewPanel({
     !isMedia &&
     !renderBrowserFile &&
     !isDocument &&
+    !renderLatex &&
     !renderMermaid &&
     file.data?.truncated === true;
   const copyLargeText = useRef<(() => Promise<string>) | null>(null);
@@ -1462,20 +1479,24 @@ export default function FilePreviewPanel({
     if (!path || path.endsWith("/")) return;
     requestWorkspaceFocus({ area: "panel", selector: "[data-file-content-focus]" });
   };
-  const rendered = isMermaid
-    ? renderMermaid
-    : isMarkdown
-      ? renderMarkdown
-      : tableDelimiter
-        ? renderTable
-        : renderBrowserFile;
-  const setRenderedPreferred = isMermaid
-    ? setRenderMermaidPreferred
-    : isMarkdown
-      ? setRenderMarkdownPreferred
-      : tableDelimiter
-        ? setRenderTablePreferred
-        : setRenderBrowserFilePreferred;
+  const rendered = isLatex
+    ? renderLatex
+    : isMermaid
+      ? renderMermaid
+      : isMarkdown
+        ? renderMarkdown
+        : tableDelimiter
+          ? renderTable
+          : renderBrowserFile;
+  const setRenderedPreferred = isLatex
+    ? setLatexPreferred
+    : isMermaid
+      ? setRenderMermaidPreferred
+      : isMarkdown
+        ? setRenderMarkdownPreferred
+        : tableDelimiter
+          ? setRenderTablePreferred
+          : setRenderBrowserFilePreferred;
   const canOpenInBrowser =
     canOperatePreview &&
     previewPath !== null &&
@@ -1847,7 +1868,22 @@ export default function FilePreviewPanel({
               <Spinner size="lg" />
             </div>
           ) : relativePath && file.data ? (
-            renderMermaid ? (
+            renderLatex ? (
+              <Suspense fallback={<FileSurfaceLoading />}>
+                <LatexWorkbench
+                  key={JSON.stringify([environmentId, cwd, relativePath])}
+                  environmentId={environmentId}
+                  cwd={cwd}
+                  relativePath={relativePath}
+                  contents={file.data.contents}
+                  composerDraftTarget={composerDraftTarget}
+                  readOnly={!canWriteFiles}
+                  onOpenFile={onOpenFile}
+                  revision={workspaceMutationId}
+                  onPendingChange={onPendingChange}
+                />
+              </Suspense>
+            ) : renderMermaid ? (
               <Suspense fallback={<FileSurfaceLoading />}>
                 <MermaidFilePreview text={file.data.contents} />
               </Suspense>
