@@ -1,0 +1,38 @@
+﻿/* The writing surface follows the paper, independently of the surrounding T3 theme. */
+.cm-editor.t3-latex-paper {
+  color-scheme: light;
+  background: #fff;
+  color: #141414;
+}
+.cm-editor.t3-latex-paper .cm-scroller {
+  background: #fff;
+}
+.cm-editor.t3-latex-paper .cm-content {
+  max-width: 82ch;
+  margin-inline: auto;
+  flex: 1 1 auto;
+  padding: 1.8rem clamp(1rem, 4%, 3.5rem) 4rem;
+  caret-color: #141414;
+}
+.cm-editor.t3-latex-paper .cm-gutters {
+  display: none;
+}
+.cm-editor.t3-latex-paper .cm-activeLine {
+  background: transparent;
+}
+.cm-editor.t3-latex-paper .cm-line > span {
+  color: inherit;
+}
+.cm-editor.t3-latex-paper .cm-line .t3-tex-reference {
+  color: #112c69;
+}
+.cm-editor.t3-latex-paper .cm-cursor {
+  border-left-color: #141414;
+}
+.cm-editor.t3-latex-paper .cm-selectionBackground {
+  background-color: #c6dafa;
+}
+.cm-editor.t3-latex-paper .t3-tex-edit-preview {
+  color: #141414;
+  border-inline-start-color: #b9c0c6;
+}

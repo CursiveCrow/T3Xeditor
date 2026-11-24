@@ -40,7 +40,10 @@ vi.mock(import("~/state/filesystem"), async (original) => ({
 }));
 vi.mock(import("~/state/use-atom-command"), async (original) => ({
   ...(await original()),
-  useAtomCommand: (() => state.writeFile) as never,
+  useAtomCommand: ((command: { label: string }) =>
+    command.label.endsWith("latex-context")
+      ? async () => AsyncResult.success({ mainFile: "paper.tex", preamble: "" })
+      : state.writeFile) as never,
 }));
 vi.mock(import("~/state/server"), async (original) => {
   const actual = await original();
@@ -766,6 +769,9 @@ it("opens TeX in the native editor, attaches selected source and reports build e
     );
     const build = screen.getByRole("button", { name: "Build PDF" });
     await expect.element(build).toBeVisible();
+    await vi.waitFor(() =>
+      expect(screen.container.querySelector(".t3-tex-section")?.textContent).toBe("Energy"),
+    );
     expect(state.writeFile).not.toHaveBeenCalled();
     const host = screen.container.querySelector(".cm-editor")!;
     const view = EditorView.findFromDOM(host as HTMLElement)!;
@@ -860,6 +866,7 @@ it("opens TeX in the native editor, attaches selected source and reports build e
     );
     await build.click();
     await expect.element(screen.getByText("Build failed", { exact: true })).toBeVisible();
+    await screen.getByRole("button", { name: "Build log" }).click();
     await expect
       .element(screen.getByText("paper.tex:2: Undefined control sequence", { exact: true }))
       .toBeVisible();
@@ -875,4 +882,41 @@ it("opens TeX in the native editor, attaches selected source and reports build e
       if (image.name === "paper.tex-page-1.png") store.removeImage(threadRef, image.id);
     store.setPrompt(threadRef, previous);
   }
+});
+
+it("typesets TeX as it is edited, retaining the editable source and undo history", async () => {
+  using _settings = setup();
+  const { EditorView } = await import("@codemirror/view");
+  const source = String.raw`\section{Meaning}
+A result $\frac{a}{b}$.
+\[
+\sum_{i=1}^n i
+\]
+\textbf{Conclusion}`;
+  await using screen = await render(markdownPreview(false, source, "paper.tex"));
+  await vi.waitFor(() => expect(screen.container.querySelectorAll("math").length).toBe(2));
+  expect(screen.container.querySelector(".t3-tex-bold")?.textContent).toBe("Conclusion");
+  const editor = EditorView.findFromDOM(screen.container.querySelector(".cm-editor")!)!;
+  const math = screen.container.querySelector<HTMLElement>(".t3-tex-math")!;
+  await act(async () => {
+    math.dispatchEvent(new MouseEvent("mousedown", { button: 0, bubbles: true }));
+  });
+  const from = source.indexOf("{a}") + 1;
+  await act(async () => {
+    editor.dispatch({
+      changes: { from, to: from + 1, insert: "c" },
+      selection: { anchor: from + 1 },
+    });
+  });
+  await vi.waitFor(() =>
+    expect(screen.container.querySelector(".t3-tex-edit-preview math")?.textContent).toContain("c"),
+  );
+  await act(async () => {
+    editor.dispatch({ selection: { anchor: editor.state.doc.length } });
+  });
+  expect(screen.container.querySelector(".t3-tex-math math")?.textContent).toContain("c");
+  await screen.getByRole("button", { name: "Live rendering" }).click();
+  expect(screen.container.querySelector("math")).toBeNull();
+  expect(editor.state.doc.toString()).toBe(source.replace("{a}", "{c}"));
+  expect(state.writeFile.mock.calls.every(([arg]) => !arg.input?.engine)).toBe(true);
 });

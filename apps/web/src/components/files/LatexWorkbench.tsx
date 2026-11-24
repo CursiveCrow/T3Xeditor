@@ -32,7 +32,7 @@ function buildDiagnostics(log: string, root: string, cwd: string) {
   const rootDirectory = root.replaceAll("\\", "/").replace(/[^/]*$/, "");
   for (const row of log.split(/\r?\n/)) {
     const match = /^(.+?\.tex):(\d+):\s*(.+)$/.exec(row);
-    if (!match) continue;
+    if (!match || /fatal error occurred, no output/i.test(match[3]!)) continue;
     const name = match[1]!.replaceAll("\\", "/").replace(/^\.\//, "");
     const workspace = cwd.replaceAll("\\", "/").replace(/\/$/, "") + "/";
     const file = name.startsWith(workspace) ? name.slice(workspace.length) : rootDirectory + name;
@@ -59,6 +59,10 @@ export default function LatexWorkbench(props: {
   useFileSaveSession(session, props.onPendingChange);
   const allowed = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
   const compile = useAtomCommand(projectEnvironment.compileLatex, { reportFailure: false });
+  const [live, setLive] = useState(true);
+  const [showPdf, setShowPdf] = useState(false);
+  const [labels, setLabels] = useState<Readonly<Record<string, string>>>({});
+  const [preamble, setPreamble] = useState("");
   const [engine, setEngine] = useState<Engine>(() => {
     const hint = /^%\s*!\s*TeX\s+program\s*=\s*(xelatex|lualatex)/im
       .exec(contents)?.[1]
@@ -69,9 +73,38 @@ export default function LatexWorkbench(props: {
     const hint = /^%\s*!\s*TeX\s+root\s*=\s*(.+)$/im.exec(contents)?.[1]?.trim();
     return hint ? relativePath.replace(/[^/\\]+$/, "") + hint : relativePath;
   });
+  const context = useAtomCommand(projectEnvironment.latexContext, { reportFailure: false });
+  const getContext = useEffectEvent(
+    async (environmentId: EnvironmentId, cwd: string, root: string, signal: AbortSignal) => {
+      const result = await context(
+        { environmentId, input: { cwd, relativePath: root } },
+        { signal },
+      );
+      if (signal.aborted || result._tag !== "Success" || !result.value) return;
+      setPreamble(result.value.preamble);
+      setLabels(result.value.labels ?? {});
+      if (result.value.mainFile !== root)
+        setRoot((current) => (current === root ? result.value.mainFile : current));
+    },
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Read the selected document's preamble from the workspace for live math macros.
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => void getContext(environmentId, cwd, root, controller.signal),
+      200,
+    );
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [environmentId, cwd, root]);
   const [auto, setAuto] = useState(false);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState("");
+  const [failed, setFailed] = useState(false);
+  const [logRoot, setLogRoot] = useState(root);
+  const [settings, setSettings] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [pdfRoot, setPdfRoot] = useState(root);
   const [clip, setClip] = useState(false);
@@ -90,7 +123,7 @@ export default function LatexWorkbench(props: {
   const lastBuild = useRef("");
   const version = JSON.stringify([contents, root, engine, props.revision]);
   const outline = contents.split("\n").flatMap((row, i) => {
-    const match = /^\s*\\(?:part|chapter|(?:sub)*section)\*?(?:\[[^\]]*\])?\{(.+)\}/.exec(row);
+    const match = /^\s*\\(?:part|chapter|(?:sub)*section)\*?(?:\[[^\]]*\])?\{([^}]+)\}/.exec(row);
     return match ? [{ line: i + 1, name: match[1] }] : [];
   });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Release this editor's pending navigation and abort its active RPC on unmount.
@@ -114,6 +147,7 @@ export default function LatexWorkbench(props: {
     active.current = controller;
     lastBuild.current = version;
     setBusy(true);
+    setShowPdf(true);
     setMessage(gt("Building PDF…"));
     try {
       for (
@@ -137,14 +171,20 @@ export default function LatexWorkbench(props: {
             "The workspace could not run the LaTeX build. Check the connection and terminal permission.",
           ),
         );
+      const builtRoot = result.value.mainFile ?? root.trim();
+      setLogRoot(builtRoot);
+      if (builtRoot !== root.trim())
+        lastBuild.current = JSON.stringify([contents, builtRoot, engine, props.revision]);
+      if (builtRoot !== root.trim()) setRoot((current) => (current === root ? builtRoot : current));
+      setFailed(!result.value.pdf);
       setLog(result.value.log);
       if (!result.value.pdf) {
         setMessage(gt("Build failed"));
-        setShowLog(true);
+        setShowLog(false);
         return;
       }
       const bytes = Uint8Array.from(atob(result.value.pdf), (char) => char.charCodeAt(0));
-      setPdfRoot(root.trim());
+      setPdfRoot(builtRoot);
       setPosition(null);
       setPdf(URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })));
       setPoints(result.value.points);
@@ -166,7 +206,7 @@ export default function LatexWorkbench(props: {
     const timer = setTimeout(() => void autoBuild(), 1000);
     return () => clearTimeout(timer);
   }, [auto, busy, allowed, version]);
-  const diagnostics = buildDiagnostics(log, root, cwd);
+  const diagnostics = buildDiagnostics(log, logRoot, cwd);
   const forward = () => {
     const candidates = points.filter((p) => p.path === relativePath.replaceAll("\\", "/"));
     const point = candidates.reduce<Point | undefined>(
@@ -252,7 +292,13 @@ export default function LatexWorkbench(props: {
   };
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b p-2 text-xs">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2 text-xs">
+        <button className={button} aria-pressed={live} onClick={() => setLive(!live)}>
+          {gt("Live rendering")}
+        </button>
+        <button className={button} aria-pressed={showPdf} onClick={() => setShowPdf(!showPdf)}>
+          {gt("PDF preview")}
+        </button>
         <button
           className={button}
           disabled={busy || !allowed || !root.trim()}
@@ -270,27 +316,16 @@ export default function LatexWorkbench(props: {
           />{" "}
           {gt("Auto-build")}
         </label>
-        <select
-          aria-label={gt("Typesetting engine")}
-          className={button}
-          value={engine}
-          onChange={(e) => setEngine(e.target.value as Engine)}
+        <button
+          className={button + " max-w-52 truncate"}
+          aria-expanded={settings}
+          onClick={() => setSettings(!settings)}
         >
-          <option value="pdflatex">pdfLaTeX</option>
-          <option value="xelatex">XeLaTeX</option>
-          <option value="lualatex">LuaLaTeX</option>
-        </select>
-        <label>
-          {gt("Main file")}{" "}
-          <input
-            className="w-28 rounded border px-1"
-            value={root}
-            onChange={(e) => setRoot(e.target.value)}
-          />
-        </label>
+          {gt("Main file")} {"/"} {root.split(/[/\\]/).at(-1)}
+        </button>
         <select
           aria-label={gt("Document outline")}
-          className={button}
+          className={button + " w-24 min-w-0 truncate"}
           value=""
           onChange={(e) => setTarget({ line: Number(e.target.value) })}
         >
@@ -346,8 +381,38 @@ export default function LatexWorkbench(props: {
         )}
         <span role="status">{allowed ? message : gt("Building requires terminal access.")}</span>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-2">
+      {settings && (
+        <div className="flex shrink-0 items-center gap-3 border-b p-2 text-xs">
+          <select
+            aria-label={gt("Typesetting engine")}
+            className={button}
+            value={engine}
+            onChange={(e) => setEngine(e.target.value as Engine)}
+          >
+            <option value="pdflatex">pdfLaTeX</option>
+            <option value="xelatex">XeLaTeX</option>
+            <option value="lualatex">LuaLaTeX</option>
+          </select>
+          <label className="flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap">
+            {gt("Main file")}{" "}
+            <input
+              className="w-full min-w-0 rounded border bg-background px-2 py-1"
+              value={root}
+              onChange={(e) => setRoot(e.target.value)}
+            />
+          </label>
+        </div>
+      )}
+      <div
+        className={
+          "grid min-h-0 flex-1 " +
+          (showPdf ? "grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)]")
+        }
+      >
         <LatexSource
+          live={live}
+          preamble={preamble}
+          labels={labels}
           contents={contents}
           readOnly={props.readOnly}
           citations={citations}
@@ -364,7 +429,7 @@ export default function LatexWorkbench(props: {
           }}
         />
         <div
-          className="flex min-h-0 min-w-0 flex-col border-l"
+          className={showPdf ? "flex min-h-0 min-w-0 flex-col border-l" : "hidden"}
           aria-label={gt("PDF preview. Double-click a line to show its source.")}
           onPointerUp={(e) => {
             const selection = window.getSelection();
@@ -403,12 +468,16 @@ export default function LatexWorkbench(props: {
             />
           ) : (
             <p className="m-auto p-4 text-center text-sm text-muted-foreground">
-              {gt("Build the main .tex file to preview its PDF.")}
+              {failed
+                ? (diagnostics[0]?.text ?? log.trim().split("\n").find(Boolean) ?? message)
+                : busy
+                  ? message
+                  : gt("Build the main .tex file to preview its PDF.")}
             </p>
           )}
         </div>
       </div>
-      {showLog && diagnostics.length > 0 && (
+      {failed && diagnostics.length > 0 && (
         <div
           aria-label={gt("Build errors")}
           className="max-h-24 overflow-auto border-t p-1 text-xs"

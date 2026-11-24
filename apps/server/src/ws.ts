@@ -15,7 +15,7 @@ import * as PeerThreadRelay from "./peer/PeerThreadRelay.ts";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Base64 from "effect/encoding/Base64";
-import { compileLatex } from "./workspace/compileLatex.ts";
+import { compileLatex, latexContext } from "./workspace/compileLatex.ts";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -3127,6 +3127,7 @@ export const layerWsRpc = (
                 }),
             ),
           ),
+        [WS_METHODS.projectsLatexContext]: (input) => Effect.promise(() => latexContext(input)),
         [WS_METHODS.projectsCompileLatex]: (input) =>
           Effect.promise((signal) => compileLatex(input, latexHostPlatform, signal)),
         [WS_METHODS.projectsWriteFile]: (input) =>

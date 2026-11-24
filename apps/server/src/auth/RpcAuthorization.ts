@@ -182,6 +182,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.projectsReadFile]: AuthFilesystemReadScope,
   [WS_METHODS.projectsSearchContents]: AuthFilesystemReadScope,
   [WS_METHODS.projectsSearchEntries]: AuthFilesystemReadScope,
+  [WS_METHODS.projectsLatexContext]: AuthFilesystemReadScope,
   [WS_METHODS.projectsCompileLatex]: AuthTerminalOperateScope,
   [WS_METHODS.projectsWriteFile]: AuthFilesystemWriteScope,
   [WS_METHODS.projectsEnsureScratch]: AuthOrchestrationOperateScope,

@@ -231,6 +231,10 @@ export function createProjectEnvironmentAtoms<R, E>(
       scheduler: projectScheduler,
       concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
     }),
+    latexContext: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projects:latex-context",
+      tag: WS_METHODS.projectsLatexContext,
+    }),
     compileLatex: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projects:compile-latex",
       tag: WS_METHODS.projectsCompileLatex,

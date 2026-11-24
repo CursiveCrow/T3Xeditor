@@ -13,7 +13,7 @@ const inside = (root: string, file: string) => {
   return rel !== ".." && !rel.startsWith(".." + NodePath.sep) && !NodePath.isAbsolute(rel);
 };
 
-export function syncPoints(data: string, root: string, cwd: string): Point[] {
+function syncPoints(data: string, root: string, cwd: string): Point[] {
   const files = new Map<string, string>();
   const points = new Map<string, Point>();
   let page = 0;
@@ -87,18 +87,101 @@ async function runLatexmk(
   throw lastFailure;
 }
 
+// Prefer the nearest project. Archived drafts often reuse chapter and master filenames.
+async function findMainFile(workspace: string, chapter: string): Promise<string> {
+  const stripComments = (text: string) => text.replace(/(?<!\\)%[^\n]*/g, "");
+  const isDocument = (text: string) => /\\(?:documentclass|documentstyle)\s*(?:\[|\{)/.test(text);
+  if (isDocument(stripComments(await NodeFSP.readFile(chapter, "utf8")))) return chapter;
+  const includes = new Map<string, string[]>();
+  const documents = new Set<string>();
+  for (let dir = NodePath.dirname(chapter); inside(workspace, dir); dir = NodePath.dirname(dir)) {
+    for (const item of await NodeFSP.readdir(dir, { withFileTypes: true })) {
+      if (!item.isFile() || !/\.tex$/i.test(item.name)) continue;
+      const file = NodePath.join(dir, item.name);
+      if ((await NodeFSP.stat(file)).size > 4 * 1024 * 1024) continue;
+      const source = stripComments(await NodeFSP.readFile(file, "utf8"));
+      if (isDocument(source)) documents.add(file);
+      includes.set(
+        file,
+        [...source.matchAll(/\\(?:input|include|subfile)\s*\{([^}]+)\}/g)]
+          .map((match) => match[1]!.trim())
+          .filter(Boolean),
+      );
+    }
+    const containsChapter = (main: string) => {
+      const seen = new Set<string>();
+      const pending = [main];
+      while (pending.length) {
+        const file = pending.pop()!;
+        if (file === chapter) return true;
+        if (seen.has(file)) continue;
+        seen.add(file);
+        for (const name of includes.get(file) ?? []) {
+          pending.push(
+            NodePath.resolve(NodePath.dirname(main), /\.tex$/i.test(name) ? name : name + ".tex"),
+          );
+        }
+      }
+      return false;
+    };
+    const matches = [...documents].filter(containsChapter);
+    if (matches.length === 1) return matches[0]!;
+    if (matches.length > 1)
+      throw new Error(
+        "Choose a main file: " +
+          matches.map((file) => NodePath.relative(workspace, file)).join(", "),
+      );
+    if (dir === workspace || dir === NodePath.dirname(dir)) break;
+  }
+  return chapter;
+}
+
+export async function latexContext(input: { cwd: string; relativePath: string }) {
+  const fallback = { mainFile: input.relativePath, preamble: "" };
+  try {
+    const root = await NodeFSP.realpath(input.cwd);
+    const source = await NodeFSP.realpath(NodePath.resolve(root, input.relativePath));
+    if (!inside(root, source) || !/\.tex$/i.test(source)) return fallback;
+    const file = await findMainFile(root, source);
+    const text = await NodeFSP.readFile(file, "utf8");
+    const labels: Record<string, string> = Object.create(null);
+    const aux = await NodeFSP.realpath(file.replace(/\.tex$/i, ".aux")).catch(() => null);
+    if (aux && inside(root, aux) && (await NodeFSP.stat(aux)).size <= 2 * 1024 * 1024) {
+      const data = await NodeFSP.readFile(aux, "utf8");
+      for (const match of data.matchAll(/^\\newlabel\{([^}]+)\}\{\{([^{}]*)\}\{([^{}]*)\}/gm)) {
+        labels[match[1]!] = match[2]!;
+        labels["page:" + match[1]!] = match[3]!;
+      }
+    }
+    return {
+      labels,
+      mainFile: NodePath.relative(root, file).split(NodePath.sep).join("/"),
+      preamble: (text.split(/\\begin\s*\{document\}/, 1)[0] ?? "").slice(0, 128 * 1024),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 export async function compileLatex(
   input: { cwd: string; relativePath: string; engine: keyof typeof flags },
   platform: NodeJS.Platform,
   signal?: AbortSignal,
 ) {
   const empty = { pdf: null, points: [], citations: [] };
+  let mainFile = input.relativePath;
   let temp: string | undefined;
   try {
     const root = await NodeFSP.realpath(input.cwd);
-    const file = await NodeFSP.realpath(NodePath.resolve(root, input.relativePath));
-    if (!inside(root, file) || !/\.tex$/i.test(file) || !(await NodeFSP.stat(file)).isFile())
+    const requested = await NodeFSP.realpath(NodePath.resolve(root, input.relativePath));
+    if (
+      !inside(root, requested) ||
+      !/\.tex$/i.test(requested) ||
+      !(await NodeFSP.stat(requested)).isFile()
+    )
       throw new Error("Choose a .tex file inside this workspace.");
+    const file = await findMainFile(root, requested);
+    mainFile = NodePath.relative(root, file).split(NodePath.sep).join("/");
     const cwd = NodePath.dirname(file);
     temp = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3latex-"));
     const stem = NodePath.parse(file).name;
@@ -148,6 +231,7 @@ export async function compileLatex(
       }
     }
     return {
+      mainFile,
       pdf: (await NodeFSP.readFile(output)).toString("base64"),
       points,
       citations: [...citations].slice(0, 5000).map(([key, detail]) => ({ key, detail })),
@@ -157,6 +241,7 @@ export async function compileLatex(
     const failure = error as Error & { stdout?: string; stderr?: string };
     return {
       ...empty,
+      mainFile,
       log: [failure.stdout, failure.stderr, failure.message]
         .filter(Boolean)
         .join("\n")

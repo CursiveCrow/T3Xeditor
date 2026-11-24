@@ -489,6 +489,7 @@ export const WS_METHODS = {
   projectsReadFile: "projects.readFile",
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
+  projectsLatexContext: "projects.latexContext",
   projectsCompileLatex: "projects.compileLatex",
   projectsWriteFile: "projects.writeFile",
   projectsMutate: "projects.mutate",
@@ -1654,6 +1655,15 @@ const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
   error: Schema.Union([ProjectReadFileError, EnvironmentAuthorizationError]),
 });
 
+const WsProjectsLatexContextRpc = Rpc.make(WS_METHODS.projectsLatexContext, {
+  payload: Schema.Struct({ cwd: Schema.String, relativePath: Schema.String }),
+  success: Schema.Struct({
+    mainFile: Schema.String,
+    preamble: Schema.String,
+    labels: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  }),
+  error: EnvironmentAuthorizationError,
+});
 const WsProjectsCompileLatexRpc = Rpc.make(WS_METHODS.projectsCompileLatex, {
   payload: Schema.Struct({
     cwd: Schema.String,
@@ -1661,6 +1671,7 @@ const WsProjectsCompileLatexRpc = Rpc.make(WS_METHODS.projectsCompileLatex, {
     engine: Schema.Literals(["pdflatex", "xelatex", "lualatex"]),
   }),
   success: Schema.Struct({
+    mainFile: Schema.optional(Schema.String),
     pdf: Schema.NullOr(Schema.String),
     log: Schema.String,
     points: Schema.Array(
@@ -2641,6 +2652,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsEnsureScratchRpc,
   WsProjectsCreateNewRpc,
   WsProjectsCreateFromThreadRpc,
+  WsProjectsLatexContextRpc,
   WsProjectsCompileLatexRpc,
   WsProjectsWriteFileRpc,
   WsProjectsMutateRpc,

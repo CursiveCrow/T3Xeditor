@@ -1,3 +1,7 @@
+import "./latexPaper.css";
+import { liveLatex, finishLiveFormula } from "./liveLatex";
+import { oneDark } from "@codemirror/theme-one-dark";
+import { useTheme } from "~/hooks/useTheme";
 import { msg } from "gt-react";
 import { m } from "~/i18n/messages";
 import { basicSetup } from "codemirror";
@@ -6,11 +10,11 @@ import {
   snippetCompletion,
   type CompletionContext,
 } from "@codemirror/autocomplete";
-import { EditorState, Transaction } from "@codemirror/state";
+import { Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { foldService, StreamLanguage } from "@codemirror/language";
 import { stex } from "@codemirror/legacy-modes/mode/stex";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const snippets = [
   ["section", "\\section{${title}}"],
@@ -63,6 +67,9 @@ function complete(
 export function LatexSource(props: {
   contents: string;
   readOnly: boolean;
+  live: boolean;
+  preamble: string;
+  labels: Readonly<Record<string, string>>;
   citations: readonly { key: string; detail: string }[];
   onChange: (text: string) => void;
   onBuild: () => void;
@@ -70,6 +77,10 @@ export function LatexSource(props: {
   onSelection: (text: string, line: number, end: number) => void;
   target: { line: number } | null;
 }) {
+  const { resolvedTheme } = useTheme();
+  const [writable] = useState(() => new Compartment());
+  const [rendering] = useState(() => new Compartment());
+  const [theme] = useState(() => new Compartment());
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | null>(null);
   const latest = useRef(props);
@@ -88,7 +99,8 @@ export function LatexSource(props: {
           keymap.of([
             {
               key: "Mod-Enter",
-              run: () => {
+              run: (view) => {
+                if (finishLiveFormula(view)) return true;
                 latest.current.onBuild();
                 return true;
               },
@@ -101,6 +113,8 @@ export function LatexSource(props: {
               },
             },
           ]),
+          rendering.of([]),
+          theme.of([]),
           basicSetup,
           StreamLanguage.define(stex),
           EditorView.lineWrapping,
@@ -118,18 +132,19 @@ export function LatexSource(props: {
             }
             return null;
           }),
-          EditorState.readOnly.of(props.readOnly),
+          writable.of(EditorState.readOnly.of(latest.current.readOnly)),
           EditorView.contentAttributes.of({ "aria-label": m(msg("LaTeX source")) }),
           autocompletion({ override: [(context) => complete(context, latest.current.citations)] }),
           EditorView.theme({
             "&": { height: "100%" },
-            ".cm-scroller": { overflow: "auto" },
+            ".cm-scroller": { overflow: "auto", lineHeight: "1.55" },
+            ".cm-content": { caretColor: "currentColor", paddingBlock: "8px" },
+            ".cm-line": { paddingInline: "10px" },
             ".cm-gutters": {
               backgroundColor: "var(--muted)",
               color: "var(--muted-foreground)",
               border: "none",
             },
-            ".cm-content": { caretColor: "currentColor" },
           }),
           EditorView.updateListener.of((update) => {
             if (
@@ -154,7 +169,25 @@ export function LatexSource(props: {
       view.destroy();
       editor.current = null;
     };
-  }, [props.readOnly]);
+  }, [theme, rendering, writable]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Update CodeMirror permissions on the existing view.
+  useEffect(() => {
+    editor.current?.dispatch({
+      effects: writable.reconfigure(EditorState.readOnly.of(props.readOnly)),
+    });
+  }, [writable, props.readOnly]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Reconfigure the mounted editor's typesetting layer without replacing its document or undo history.
+  useEffect(() => {
+    editor.current?.dispatch({
+      effects: rendering.reconfigure(props.live ? liveLatex(props.preamble, props.labels) : []),
+    });
+  }, [props.live, props.preamble, props.labels, rendering]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Apply the app theme to CodeMirror without resetting the document or undo history.
+  useEffect(() => {
+    editor.current?.dispatch({
+      effects: theme.reconfigure(!props.live && resolvedTheme === "dark" ? oneDark : []),
+    });
+  }, [props.live, resolvedTheme, theme]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Apply document changes and navigation requests to the live CodeMirror view.
   useEffect(() => {
     const view = editor.current;
