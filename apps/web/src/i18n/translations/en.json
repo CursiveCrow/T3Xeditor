@@ -12820,9 +12820,7 @@
   "cca5395f9d7295bc": "Auto-build",
   "43c311837eca02d8": "Typesetting engine",
   "59160c682b7c2148": "Main file",
-  "b8dffbd33a3336b8": "Document outline",
   "9e6edd810dd7f75b": "Outline",
-  "e66bd9633cfe51e1": "Go to PDF",
   "a6789459fafc3dc4": "Add selection to chat",
   "351ce9f28583b8ec": "Build log",
   "ada280f8f064c7b7": "Drag over a figure or equation to attach it to chat.",
@@ -12831,5 +12829,17 @@
   "04e7539c6f511750": "Building requires terminal access.",
   "e751c7b1ca10b2f9": "PDF preview. Double-click a line to show its source.",
   "4f5b58fef1de0e5b": "Build the main .tex file to preview its PDF.",
-  "32362526bd53da3b": "Build errors"
+  "32362526bd53da3b": "Build errors",
+  "a1d655ea9d704b4b": "No sections yet",
+  "3eb780459a123825": "Build stopped",
+  "32bcd0e6f2eeae06": "latexmk is not installed on this workspace's machine.",
+  "f96948bcbfe0e68f": "Choose a .tex file in this workspace as the main file.",
+  "495f7c8283497efb": "More than one document includes this file. Choose the main file.",
+  "e3c166ffb2d2a168": "The build did not finish within 90 seconds.",
+  "9b8a1683b29c1d46": "The PDF is larger than the 12 MiB preview limit.",
+  "7e8c1ea6e54dc32d": "Stop",
+  "2a4068813f752392": "Main file and engine",
+  "8925c241819a8a01": "Live rendering",
+  "baa2b863ccb5756d": "PDF preview",
+  "81f5823de5184bc0": "Go to PDF ({shortcut})"
 }

@@ -1217,7 +1217,9 @@ function renderedToggleLabel(
   resolve: MessageResolver,
 ): string {
   if (mode === "latex")
-    return rendered ? resolve(msg("Show source")) : resolve(msg("Open LaTeX editor"));
+    return rendered
+      ? resolve(msg("Show source"))
+      : resolve(msg("Open {name}", { name: "T3Xeditor" }));
   if (mode === "mermaid")
     return rendered ? resolve(msg("Show Mermaid source")) : resolve(msg("Show rendered diagram"));
   if (mode === "markdown")

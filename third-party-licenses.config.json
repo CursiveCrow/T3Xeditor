@@ -153,6 +153,22 @@
       "sourceUrl": "https://github.com/ryanoasis/nerd-fonts"
     },
     {
+      "bundles": ["assets", "web"],
+      "license": "LicenseRef-GUST-Font-License",
+      "name": "Latin Modern fonts",
+      "noticeFile": "apps/web/src/assets/latin-modern/GUST-FONT-LICENSE.TXT",
+      "sourceUrl": "https://www.gust.org.pl/projects/e-foundry/latin-modern",
+      "version": "2.004"
+    },
+    {
+      "bundles": ["assets", "web"],
+      "license": "OFL-1.1",
+      "name": "T3 Double Struck (derived from DSSerif)",
+      "noticeFile": "apps/web/src/assets/double-struck/OFL.txt",
+      "sourceUrl": "https://ctan.org/pkg/dsserif",
+      "version": "1.031"
+    },
+    {
       "bundles": ["ios", "mobile"],
       "license": "MIT",
       "name": "GhosttyKit",

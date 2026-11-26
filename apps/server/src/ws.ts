@@ -15,7 +15,6 @@ import * as PeerThreadRelay from "./peer/PeerThreadRelay.ts";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Base64 from "effect/encoding/Base64";
-import { compileLatex, latexContext } from "./workspace/compileLatex.ts";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -82,6 +81,8 @@ import {
   type ProjectFileOperation,
   type ProjectMutation,
   ProjectListEntriesError,
+  ProjectCompileLatexError,
+  type ProjectCompileLatexFailure,
   ProjectReadFileError,
   ProjectSearchContentsError,
   ProjectSearchEntriesError,
@@ -227,6 +228,7 @@ import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFolders from "./workspace/WorkspaceFolders.ts";
 import * as TaskFolders from "./workspace/TaskFolders.ts";
 import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
+import * as LatexBuilds from "./workspace/LatexBuilds.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import { readWorkflowScript } from "./orchestration-v2/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
@@ -722,6 +724,28 @@ function projectFileFailureContext(
       return { failure: "path_not_file", resolvedPath: error.resolvedPath };
     case "WorkspaceBinaryFileError":
       return { failure: "binary_file", resolvedPath: error.resolvedPath };
+    default:
+      return unexpectedCompatibilityError(error);
+  }
+}
+
+function latexBuildFailureContext(error: LatexBuilds.LatexBuildError): {
+  readonly reason: ProjectCompileLatexFailure;
+  readonly candidates?: ReadonlyArray<string>;
+} {
+  switch (error._tag) {
+    case "LatexCompilerNotInstalledError":
+      return { reason: "compiler_not_installed" };
+    case "LatexMainFileInvalidError":
+      return { reason: "invalid_main_file" };
+    case "LatexMainFileAmbiguousError":
+      return { reason: "ambiguous_main_file", candidates: error.candidates };
+    case "LatexBuildTimeoutError":
+      return { reason: "timed_out" };
+    case "LatexPdfTooLargeError":
+      return { reason: "pdf_too_large" };
+    case "LatexBuildOperationError":
+      return { reason: "operation_failed" };
     default:
       return unexpectedCompatibilityError(error);
   }
@@ -1594,7 +1618,7 @@ export const layerWsRpc = (
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFolders = yield* WorkspaceFolders.WorkspaceFolders;
       const taskFolders = yield* TaskFolders.TaskFolders;
-      const latexHostPlatform = yield* HostProcess.Platform;
+      const latexBuilds = yield* LatexBuilds.LatexBuilds;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
@@ -3127,9 +3151,19 @@ export const layerWsRpc = (
                 }),
             ),
           ),
-        [WS_METHODS.projectsLatexContext]: (input) => Effect.promise(() => latexContext(input)),
+        [WS_METHODS.projectsLatexContext]: (input) => latexBuilds.context(input),
         [WS_METHODS.projectsCompileLatex]: (input) =>
-          Effect.promise((signal) => compileLatex(input, latexHostPlatform, signal)),
+          latexBuilds.compile(input).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProjectCompileLatexError({
+                  cwd: input.cwd,
+                  relativePath: input.relativePath,
+                  ...latexBuildFailureContext(cause),
+                  cause,
+                }),
+            ),
+          ),
         [WS_METHODS.projectsWriteFile]: (input) =>
           workspaceFileSystem.writeFile(input).pipe(
             Effect.mapError(

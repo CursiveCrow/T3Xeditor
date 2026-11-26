@@ -551,6 +551,131 @@ export class ProjectReadFileError extends Schema.TaggedError<ProjectReadFileErro
   }
 }
 
+export const ProjectLatexContextInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  relativePath: Schema.NonEmptyString.check(Schema.isMaxLength(PROJECT_READ_FILE_PATH_MAX_LENGTH)),
+});
+export type ProjectLatexContextInput = typeof ProjectLatexContextInput.Type;
+
+export const ProjectLatexContext = Schema.Struct({
+  mainFile: Schema.String,
+  preamble: Schema.String,
+  // `name` maps to the printed number and `page:name` to the page, as the last build's .aux wrote them.
+  labels: Schema.Record(Schema.String, Schema.String),
+});
+export type ProjectLatexContext = typeof ProjectLatexContext.Type;
+
+export const ProjectLatexEngine = Schema.Literals(["pdflatex", "xelatex", "lualatex"]);
+export type ProjectLatexEngine = typeof ProjectLatexEngine.Type;
+
+export const ProjectCompileLatexInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  relativePath: Schema.NonEmptyString.check(Schema.isMaxLength(PROJECT_READ_FILE_PATH_MAX_LENGTH)),
+  // The file whose TikZ pictures are measured; defaults to `relativePath`.
+  figurePath: Schema.optional(
+    Schema.NonEmptyString.check(Schema.isMaxLength(PROJECT_READ_FILE_PATH_MAX_LENGTH)),
+  ),
+  engine: ProjectLatexEngine,
+});
+export type ProjectCompileLatexInput = typeof ProjectCompileLatexInput.Type;
+
+/** A build that ran but failed is a result with `pdf: null` and the compiler log. */
+export const ProjectCompileLatexResult = Schema.Struct({
+  mainFile: Schema.String,
+  pdf: Schema.NullOr(Schema.String),
+  log: Schema.String,
+  points: Schema.Array(
+    Schema.Struct({
+      path: Schema.String,
+      line: Schema.Number,
+      page: Schema.Number,
+      y: Schema.Number,
+    }),
+  ),
+  figures: Schema.Array(
+    Schema.Struct({
+      line: Schema.Number,
+      page: Schema.Number,
+      x: Schema.Number,
+      y: Schema.Number,
+      width: Schema.Number,
+      height: Schema.Number,
+    }),
+  ),
+  figureSourceHash: Schema.optional(Schema.String),
+  symbolSheet: Schema.optional(
+    Schema.Struct({
+      pdf: Schema.String,
+      glyphs: Schema.Array(
+        Schema.Struct({ command: Schema.String, depth: Schema.Number, em: Schema.Number }),
+      ),
+    }),
+  ),
+  citations: Schema.Array(Schema.Struct({ key: Schema.String, detail: Schema.String })),
+  // This build's cross-references, keyed as in `ProjectLatexContext.labels`.
+  labels: Schema.Record(Schema.String, Schema.String),
+});
+export type ProjectCompileLatexResult = typeof ProjectCompileLatexResult.Type;
+
+export const ProjectCompileLatexFailure = Schema.Literals([
+  "compiler_not_installed",
+  "invalid_main_file",
+  "ambiguous_main_file",
+  "timed_out",
+  "pdf_too_large",
+  "operation_failed",
+]);
+export type ProjectCompileLatexFailure = typeof ProjectCompileLatexFailure.Type;
+
+const projectCompileLatexMessage = (
+  reason: ProjectCompileLatexFailure,
+  candidates: ReadonlyArray<string> | undefined,
+) => {
+  switch (reason) {
+    case "compiler_not_installed":
+      return "Install latexmk on the T3 workspace host to build PDFs.";
+    case "invalid_main_file":
+      return "Choose a .tex file inside this workspace.";
+    case "ambiguous_main_file":
+      return `Choose a main file: ${(candidates ?? []).join(", ")}`;
+    case "timed_out":
+      return "The LaTeX build did not finish within 90 seconds.";
+    case "pdf_too_large":
+      return "PDF exceeds the 12 MiB preview limit.";
+    case "operation_failed":
+      return "The LaTeX build could not run on the workspace host.";
+  }
+};
+
+export class ProjectCompileLatexError extends Schema.TaggedError<ProjectCompileLatexError>()(
+  "ProjectCompileLatexError",
+  {
+    cwd: TrimmedNonEmptyString,
+    relativePath: Schema.NonEmptyString,
+    reason: ProjectCompileLatexFailure,
+    // Workspace-relative documents that each include the requested file.
+    candidates: Schema.optional(Schema.Array(Schema.String)),
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  // @effect-diagnostics-next-line overriddenSchemaConstructor:off -- The message derives from reason so callers cannot drift from it.
+  constructor(props: {
+    readonly cwd: string;
+    readonly relativePath: string;
+    readonly reason: ProjectCompileLatexFailure;
+    readonly candidates?: ReadonlyArray<string>;
+    readonly cause?: unknown;
+  }) {
+    super({
+      ...props,
+      message:
+        decodedProjectErrorMessage(props) ??
+        projectCompileLatexMessage(props.reason, props.candidates),
+    } as any);
+  }
+}
+
 export const ProjectWriteFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   relativePath: Schema.NonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),

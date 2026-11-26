@@ -289,6 +289,9 @@ import {
   OrchestrationV2ThreadLaunchError,
 } from "./orchestrationV2.ts";
 import {
+  ProjectCompileLatexError,
+  ProjectCompileLatexInput,
+  ProjectCompileLatexResult,
   ProjectCreateNewInput,
   ProjectCreateNewResult,
   ProjectCreateFromThreadInput,
@@ -299,6 +302,8 @@ import {
   ProjectListEntriesResult,
   ProjectListIgnoredFilesInput,
   ProjectListIgnoredFilesResult,
+  ProjectLatexContext,
+  ProjectLatexContextInput,
   ProjectReadFileError,
   ProjectReadFileInput,
   ProjectReadFileResult,
@@ -1656,35 +1661,14 @@ const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
 });
 
 const WsProjectsLatexContextRpc = Rpc.make(WS_METHODS.projectsLatexContext, {
-  payload: Schema.Struct({ cwd: Schema.String, relativePath: Schema.String }),
-  success: Schema.Struct({
-    mainFile: Schema.String,
-    preamble: Schema.String,
-    labels: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-  }),
+  payload: ProjectLatexContextInput,
+  success: ProjectLatexContext,
   error: EnvironmentAuthorizationError,
 });
 const WsProjectsCompileLatexRpc = Rpc.make(WS_METHODS.projectsCompileLatex, {
-  payload: Schema.Struct({
-    cwd: Schema.String,
-    relativePath: Schema.String,
-    engine: Schema.Literals(["pdflatex", "xelatex", "lualatex"]),
-  }),
-  success: Schema.Struct({
-    mainFile: Schema.optional(Schema.String),
-    pdf: Schema.NullOr(Schema.String),
-    log: Schema.String,
-    points: Schema.Array(
-      Schema.Struct({
-        path: Schema.String,
-        line: Schema.Number,
-        page: Schema.Number,
-        y: Schema.Number,
-      }),
-    ),
-    citations: Schema.Array(Schema.Struct({ key: Schema.String, detail: Schema.String })),
-  }),
-  error: EnvironmentAuthorizationError,
+  payload: ProjectCompileLatexInput,
+  success: ProjectCompileLatexResult,
+  error: Schema.Union([ProjectCompileLatexError, EnvironmentAuthorizationError]),
 });
 
 const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {

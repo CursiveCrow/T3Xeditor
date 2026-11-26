@@ -42,7 +42,7 @@ vi.mock(import("~/state/use-atom-command"), async (original) => ({
   ...(await original()),
   useAtomCommand: ((command: { label: string }) =>
     command.label.endsWith("latex-context")
-      ? async () => AsyncResult.success({ mainFile: "paper.tex", preamble: "" })
+      ? async () => AsyncResult.success({ mainFile: "paper.tex", preamble: "", labels: {} })
       : state.writeFile) as never,
 }));
 vi.mock(import("~/state/server"), async (original) => {
@@ -176,10 +176,17 @@ import FilePreviewPanel from "./FilePreviewPanel";
 const environmentId = EnvironmentId.make("markdown-preview-test");
 const threadRef = { environmentId, threadId: ThreadId.make("thread") };
 function setup() {
-  const keys = ["t3code.fileExplorerOpen", "t3code.renderMarkdown"];
+  const keys = [
+    "t3code.fileExplorerOpen",
+    "t3code.renderMarkdown",
+    "t3code.latexLiveRendering",
+    "t3code.latexPdfPreview",
+    "t3code.latexAutoBuild",
+  ];
   const previous = keys.map((key) => localStorage.getItem(key));
   localStorage.setItem(keys[0]!, "false");
   localStorage.setItem(keys[1]!, "true");
+  for (const key of keys.slice(2)) localStorage.removeItem(key);
   state.file = null;
   state.optimistic = null;
   state.assetUrl = { _tag: "Loading" };
@@ -770,7 +777,7 @@ it("opens TeX in the native editor, attaches selected source and reports build e
     const build = screen.getByRole("button", { name: "Build PDF" });
     await expect.element(build).toBeVisible();
     await vi.waitFor(() =>
-      expect(screen.container.querySelector(".t3-tex-section")?.textContent).toBe("Energy"),
+      expect(screen.container.querySelector(".t3-tex-section")?.textContent).toBe("1 Energy"),
     );
     expect(state.writeFile).not.toHaveBeenCalled();
     const host = screen.container.querySelector(".cm-editor")!;
@@ -788,9 +795,12 @@ it("opens TeX in the native editor, attaches selected source and reports build e
     const { testPdf } = await import("../../../test/testPdf");
     state.writeFile.mockResolvedValue(
       AsyncResult.success({
+        mainFile: "paper.tex",
         pdf: btoa(await testPdf().text()),
         points: [{ path: "paper.tex", line: 2, page: 1, y: 70 }],
+        figures: [],
         citations: [],
+        labels: {},
         log: "Build complete",
       }),
     );
@@ -858,9 +868,12 @@ it("opens TeX in the native editor, attaches selected source and reports build e
     );
     state.writeFile.mockResolvedValue(
       AsyncResult.success({
+        mainFile: "paper.tex",
         pdf: null,
         points: [],
+        figures: [],
         citations: [],
+        labels: {},
         log: "paper.tex:2: Undefined control sequence",
       }),
     );
